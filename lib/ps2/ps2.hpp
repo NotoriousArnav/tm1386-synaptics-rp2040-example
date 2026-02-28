@@ -39,6 +39,18 @@ public:
         bool y_overflow;  ///< Y counter overflowed
     };
 
+    /// Decoded 6-byte Synaptics Absolute Mode packet.
+    struct SynapticsData {
+        int  x;       ///< Absolute X coordinate (approx 0 to 6143)
+        int  y;       ///< Absolute Y coordinate (approx 0 to 6143)
+        int  z;       ///< Pressure / capacitance (0 to 127)
+        int  w;       ///< Finger width/count (0=2 fingers, 1=3 fingers, >=4=width)
+        bool left;    ///< Physical left button state
+        bool right;   ///< Physical right button state
+        bool up;      // Up button (if present)
+        bool down;    // Down button (if present)
+    };
+
     /// Construct a PS/2 host driver. Does NOT touch hardware until init().
     ///
     /// @param pio       PIO instance (pio0 or pio1)
@@ -101,12 +113,40 @@ public:
     /// @return true if a complete valid packet was received
     bool read_packet(Packet &pkt, uint32_t timeout_ms = 100);
 
+    /// Identify if the connected device is a Synaptics Touchpad.
+    /// Sends the special E8 sequence to query identity.
+    ///
+    /// @param[out] minor       Minor version number
+    /// @param[out] model_code  Model code
+    /// @param[out] major       Major version number
+    /// @return true if device responded as a Synaptics Touchpad
+    bool synaptics_identify(uint8_t &minor, uint8_t &model_code, uint8_t &major);
+
+    /// Write the Synaptics Mode Byte using the special E8 sequence.
+    /// E.g. 0x81 = Absolute Mode + W Mode.
+    ///
+    /// @param mode_byte  The new mode byte to set
+    /// @return true if mode was set successfully
+    bool synaptics_set_mode(uint8_t mode_byte);
+
+    /// Read and parse one 6-byte Synaptics Absolute Mode packet.
+    /// Use this instead of read_packet() after setting absolute mode.
+    ///
+    /// @param[out] data        Decoded absolute data
+    /// @param      timeout_ms  Timeout for each byte
+    /// @return true if a complete valid packet was received
+    bool read_synaptics_packet(SynapticsData &data, uint32_t timeout_ms = 100);
+
+    /// Is the driver currently expecting Synaptics absolute mode packets?
+    bool is_synaptics_absolute() const { return is_synaptics_absolute_; }
+
 private:
     PIO  pio_;
     uint sm_;
     uint data_pin_;
     uint clk_pin_;
     uint pio_offset_;
+    bool is_synaptics_absolute_;
 
     /// Drain any stale bytes from the PIO RX FIFO.
     void flush_rx();

@@ -26,6 +26,9 @@ static constexpr uint8_t PS2_CMD_RESET  = 0xFF;
 static constexpr uint8_t PS2_CMD_RESEND = 0xFE;
 static constexpr uint8_t PS2_CMD_ENABLE = 0xF4;
 static constexpr uint8_t PS2_CMD_DISABLE = 0xF5;
+static constexpr uint8_t PS2_CMD_SET_RES = 0xE8;
+static constexpr uint8_t PS2_CMD_STATUS_REQ = 0xE9;
+static constexpr uint8_t PS2_CMD_SET_RATE = 0xF3;
 
 // ---------------------------------------------------------------------------
 // Constructor
@@ -33,7 +36,7 @@ static constexpr uint8_t PS2_CMD_DISABLE = 0xF5;
 
 PS2::PS2(PIO pio, uint sm, uint data_pin, uint clk_pin)
     : pio_(pio), sm_(sm), data_pin_(data_pin), clk_pin_(clk_pin),
-      pio_offset_(0) {}
+      pio_offset_(0), is_synaptics_absolute_(false) {}
 
 // ---------------------------------------------------------------------------
 // init — load PIO program, configure pins, start state machine
@@ -359,6 +362,142 @@ bool PS2::read_packet(Packet &pkt, uint32_t timeout_ms) {
     // Sign-extend X and Y using the sign bits in byte 0
     pkt.dx = buf[1] - ((buf[0] & 0x10) ? 256 : 0);
     pkt.dy = buf[2] - ((buf[0] & 0x20) ? 256 : 0);
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// synaptics_identify — Send E8 sequence to query identity
+// ---------------------------------------------------------------------------
+
+bool PS2::synaptics_identify(uint8_t &minor, uint8_t &model_code, uint8_t &major) {
+    // Sequence: Set Resolution to 0 four times, then Status Request
+    for (int i = 0; i < 4; i++) {
+        if (!command(PS2_CMD_SET_RES, 0x00)) return false;
+    }
+    
+    flush_rx();
+    if (!send_byte(PS2_CMD_STATUS_REQ)) return false;
+
+    uint8_t resp[3];
+    // ACK
+    if (!recv_byte(resp[0], 200) || resp[0] != PS2_ACK) return false;
+    
+    // Read 3 status bytes
+    for (int i = 0; i < 3; i++) {
+        if (!recv_byte(resp[i], 200)) return false;
+    }
+
+    // Synaptics signature is 0x47 in the middle byte
+    if (resp[1] != 0x47) {
+        return false;
+    }
+
+    minor = resp[0];
+    major = resp[2] & 0x0F;
+    model_code = (resp[2] >> 4) & 0x0F;
+    
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// synaptics_set_mode — Write Synaptics mode byte using E8 sequence
+// ---------------------------------------------------------------------------
+
+bool PS2::synaptics_set_mode(uint8_t mode_byte) {
+    // Mode byte is split into four 2-bit chunks, sent as resolution commands
+    uint8_t chunks[4];
+    chunks[0] = (mode_byte >> 6) & 0x03;
+    chunks[1] = (mode_byte >> 4) & 0x03;
+    chunks[2] = (mode_byte >> 2) & 0x03;
+    chunks[3] = (mode_byte >> 0) & 0x03;
+
+    for (int i = 0; i < 4; i++) {
+        if (!command(PS2_CMD_SET_RES, chunks[i])) return false;
+    }
+
+    // Set Sample Rate to 20 (0x14) to commit the mode byte
+    if (!command(PS2_CMD_SET_RATE, 0x14)) {
+        return false;
+    }
+
+    // Update state flag (bit 7 of mode_byte enables absolute mode)
+    is_synaptics_absolute_ = (mode_byte & 0x80) != 0;
+    
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// read_synaptics_packet — Read and decode a 6-byte Absolute Mode packet
+//
+// Format (W mode enabled):
+// B0: 1 0 W3 W2 0 W1 R L
+// B1: Y11 Y10 Y9 Y8 X11 X10 X9 X8
+// B2: Z7 Z6 Z5 Z4 Z3 Z2 Z1 Z0
+// B3: 1 1 Y12 X12 0 W0 D U
+// B4: X7 X6 X5 X4 X3 X2 X1 X0
+// B5: Y7 Y6 Y5 Y4 Y3 Y2 Y1 Y0
+// ---------------------------------------------------------------------------
+
+bool PS2::read_synaptics_packet(SynapticsData &data, uint32_t timeout_ms) {
+    uint8_t buf[6];
+
+    if (!recv_byte(buf[0], timeout_ms)) {
+        return false;
+    }
+
+    // Validate sync bit: Bit 7 of byte 0 should be 1.
+    if ((buf[0] & 0x80) == 0) {
+        static constexpr int MAX_RESYNC = 24;
+        bool synced = false;
+        for (int i = 0; i < MAX_RESYNC; i++) {
+            uint8_t candidate;
+            if (!recv_byte(candidate, timeout_ms)) {
+                return false;
+            }
+            if (candidate & 0x80) {
+                buf[0] = candidate;
+                synced = true;
+                printf("[PS2] Synaptics Resync: skipped %d byte(s)\n", i + 1);
+                break;
+            }
+        }
+        if (!synced) {
+            flush_rx();
+            printf("[PS2] Synaptics Resync failed — flushed RX FIFO\n");
+            return false;
+        }
+    }
+
+    // Read remaining 5 bytes
+    for (int i = 1; i < 6; i++) {
+        if (!recv_byte(buf[i], timeout_ms)) {
+            return false;
+        }
+    }
+
+    // Secondary sync check on byte 3: bits 7 and 6 are usually 1 1 or 1 0.
+    // If bit 7 of byte 3 is 0, we might be out of sync.
+    if ((buf[3] & 0x80) == 0) {
+        // Just let the next loop iteration resync
+        return false;
+    }
+
+    // Extract X and Y (13 bits each)
+    data.x = buf[4] | ((buf[1] & 0x0F) << 8) | (((buf[3] >> 4) & 0x01) << 12);
+    data.y = buf[5] | (((buf[1] >> 4) & 0x0F) << 8) | (((buf[3] >> 5) & 0x01) << 12);
+    
+    // Extract Z (Pressure)
+    data.z = buf[2];
+
+    // Extract W (Finger count / width)
+    data.w = ((buf[0] & 0x30) >> 2) | ((buf[0] & 0x04) >> 1) | ((buf[3] & 0x04) >> 2);
+
+    // Extract Buttons
+    data.left  = buf[0] & 0x01;
+    data.right = (buf[0] >> 1) & 0x01;
+    data.up    = buf[3] & 0x01;
+    data.down  = (buf[3] >> 1) & 0x01;
 
     return true;
 }

@@ -10,8 +10,10 @@ Built as a driver/example for using laptop trackpads as input devices in custom 
 
 ## Hardware Notes — TM1386
 
-- **Single physical button** — reports as PS/2 middle-click (bit 2 of byte 0), not left-click. The application remaps it to a unified `BTN` field.
-- **LED / notch** at the top-left corner of the module — this is a physical reference point only and has no electrical function.
+- **Synaptics Absolute Mode:** The driver automatically detects if the trackpad is Synaptics-compatible and switches it into Absolute Mode with W-Mode enabled.
+  - This bypasses the trackpad's internal firmware filters, meaning you get raw **X, Y, Z (pressure), and W (finger counts)** instead of pre-processed relative deltas.
+  - The physical button now correctly registers even if you press it without a finger on the capacitive surface (a common issue in standard PS/2 mode due to palm-rejection).
+- **Multi-Touch:** The TM1386 supports multi-touch presence detection. When in Absolute Mode, the driver outputs `FINGERS:n` indicating if 1, 2, or 3 fingers are touching the pad simultaneously.
 - **Orientation:** Mount the trackpad in portrait (rotated 90° clockwise from default) so the X axis becomes the long scratch axis and the Y axis becomes the short axis for secondary controls.
 
 ## Wiring
@@ -83,15 +85,18 @@ CLK  pin: GP3
 [INIT] PIO driver ready.
 [INIT] Sending reset (0xFF)...
 [INIT] Reset OK. Device ID: 0x00
+[INIT] Synaptics Touchpad detected! (v8.1, model 0x1)
+[INIT] Enabling Synaptics Absolute + W Mode...
+[INIT] Synaptics Absolute Mode enabled.
 [INIT] Enabling data reporting (0xF4)...
 [INIT] Data reporting enabled.
 
 [READY] Listening for trackpad packets...
-[READY] Format: X:±nnn Y:±nnn BTN:n
+[READY] Format: X:nnnn Y:nnnn Z:nnn FINGERS:n BTN:n
 
-X:  +3 Y:  -1 BTN:0
-X:  +5 Y:  -2 BTN:0
-X:  +0 Y:  +1 BTN:1
+X:1452 Y:3200 Z:045 FINGERS:1 BTN:0
+X:1460 Y:3205 Z:048 FINGERS:1 BTN:0
+X:2800 Y:4000 Z:050 FINGERS:2 BTN:1
 ```
 
 ### LED indicators

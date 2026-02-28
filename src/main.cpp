@@ -98,6 +98,23 @@ int main() {
         led_blink(5, 50, 50);  // 5 fast blinks = reset failed
     }
 
+    // Attempt to identify and switch to Synaptics Absolute Mode
+    uint8_t syn_minor, syn_model, syn_major;
+    bool is_synaptics = trackpad.synaptics_identify(syn_minor, syn_model, syn_major);
+    
+    if (is_synaptics) {
+        printf("[INIT] Synaptics Touchpad detected! (v%d.%d, model 0x%X)\n", syn_major, syn_minor, syn_model);
+        printf("[INIT] Enabling Synaptics Absolute + W Mode...\n");
+        // 0x81 = Absolute Mode (bit 7) | W Mode (bit 0)
+        if (trackpad.synaptics_set_mode(0x81)) {
+            printf("[INIT] Synaptics Absolute Mode enabled.\n");
+        } else {
+            printf("[INIT] WARNING: Failed to set Synaptics mode.\n");
+        }
+    } else {
+        printf("[INIT] Standard PS/2 Mouse detected (no Synaptics signature).\n");
+    }
+
     // Enable data reporting (stream mode)
     printf("[INIT] Enabling data reporting (0xF4)...\n");
     if (trackpad.enable_reporting()) {
@@ -108,36 +125,53 @@ int main() {
 
     printf("\n");
     printf("[READY] Listening for trackpad packets...\n");
-    printf("[READY] Format: X:±nnn Y:±nnn BTN:n\n");
-    printf("[NOTE]  TM1386 single button reports as PS/2 middle-click — remapped to BTN.\n");
+    if (trackpad.is_synaptics_absolute()) {
+        printf("[READY] Format: X:nnnn Y:nnnn Z:nnn FINGERS:n BTN:n\n");
+    } else {
+        printf("[READY] Format: X:±nnn Y:±nnn BTN:n\n");
+        printf("[NOTE]  TM1386 single button reports as PS/2 middle-click — remapped to BTN.\n");
+    }
     printf("\n");
 
     // LED solid ON = running
     gpio_put(LED_PIN, 1);
 
     // Main loop: continuously read and print packets
-    PS2::Packet pkt;
+    PS2::Packet rel_pkt;
+    PS2::SynapticsData abs_pkt;
     uint32_t packet_count = 0;
 
     while (true) {
-        if (trackpad.read_packet(pkt, 500)) {
-            packet_count++;
+        if (trackpad.is_synaptics_absolute()) {
+            if (trackpad.read_synaptics_packet(abs_pkt, 500)) {
+                packet_count++;
+                
+                int fingers = 0;
+                if (abs_pkt.z > 0) { // Only count fingers if touching
+                    if (abs_pkt.w == 0) fingers = 2;
+                    else if (abs_pkt.w == 1) fingers = 3;
+                    else fingers = 1; // W=2 is pen, W>=4 is normal width
+                }
 
-            // TM1386 single button reports as PS/2 middle-click.
-            // Treat any button (left, right, or middle) as a single BTN press.
-            bool btn = pkt.left || pkt.right || pkt.middle;
+                // Any hardware button counts as BTN
+                bool btn = abs_pkt.left || abs_pkt.right || abs_pkt.up || abs_pkt.down;
 
-            printf("X:%+4d Y:%+4d BTN:%d",
-                   pkt.dx, pkt.dy, btn);
+                printf("X:%04d Y:%04d Z:%03d FINGERS:%d BTN:%d\n",
+                       abs_pkt.x, abs_pkt.y, abs_pkt.z, fingers, btn);
 
-            if (pkt.x_overflow || pkt.y_overflow) {
-                printf(" [OVF]");
+                gpio_put(LED_PIN, packet_count & 1);
             }
+        } else {
+            if (trackpad.read_packet(rel_pkt, 500)) {
+                packet_count++;
 
-            printf("\n");
+                bool btn = rel_pkt.left || rel_pkt.right || rel_pkt.middle;
+                printf("X:%+4d Y:%+4d BTN:%d", rel_pkt.dx, rel_pkt.dy, btn);
+                if (rel_pkt.x_overflow || rel_pkt.y_overflow) printf(" [OVF]");
+                printf("\n");
 
-            // Toggle LED on each packet for visual activity feedback
-            gpio_put(LED_PIN, packet_count & 1);
+                gpio_put(LED_PIN, packet_count & 1);
+            }
         }
     }
 
