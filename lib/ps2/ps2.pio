@@ -1,0 +1,32 @@
+; SPDX-License-Identifier: GPL-3.0-or-later
+;
+; ps2.pio — PIO program for receiving PS/2 frames on RP2040
+;
+; PS/2 frame: 1 start bit (0) + 8 data bits (LSB first) + 1 parity + 1 stop (1)
+; The DEVICE generates the clock. We sample DATA on each CLK falling edge.
+;
+; Pin mapping:
+;   in pin 0  = DATA  (base pin)
+;   in pin 1  = CLK   (base pin + 1)
+;
+; After receiving 11 clock cycles we push the raw 11-bit frame.
+; The C code extracts the 8 data bits from bits [1..8] (LSB of frame is the
+; start bit, then 8 data bits, parity, stop — all shifted in LSB-first).
+
+.program ps2_rx
+
+.wrap_target
+    wait 0 pin 1           ; wait for CLK to go LOW  (start of a bit)
+    wait 1 pin 1           ; wait for CLK to go HIGH (skip the start bit)
+    set x, 7               ; 8 data bits to receive
+bitloop:
+    wait 0 pin 1           ; CLK falling edge
+    in pins, 1             ; sample DATA into ISR (shifts right)
+    wait 1 pin 1           ; CLK rising edge
+    jmp x-- bitloop        ; loop for all 8 data bits
+    wait 0 pin 1           ; parity bit — CLK falling edge
+    wait 1 pin 1           ; parity bit — CLK rising edge
+    wait 0 pin 1           ; stop bit — CLK falling edge
+    wait 1 pin 1           ; stop bit — CLK rising edge
+    push noblock            ; push 8 data bits to RX FIFO
+.wrap

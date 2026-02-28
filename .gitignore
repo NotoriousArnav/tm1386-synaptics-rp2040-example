@@ -1,0 +1,22 @@
+# Build output
+build/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Compiled objects
+*.o
+*.elf
+*.bin
+*.hex
+*.uf2
+*.dis
+*.map
