@@ -1,5 +1,7 @@
 # PS/2 Trackpad (TM1386) Reader for Raspberry Pi Pico
 
+[![Build](https://github.com/NotoriousArnav/pico-touchpad-tm1386/actions/workflows/build.yml/badge.svg)](https://github.com/NotoriousArnav/pico-touchpad-tm1386/actions/workflows/build.yml)
+
 Reads movement and button data from a PS/2 trackpad (TM1386 or compatible) using a Raspberry Pi Pico (RP2040) and prints it over USB serial.
 
 The PS/2 protocol is handled by a **PIO-based driver** (`lib/ps2/`) that can be reused in any pico-sdk project.
@@ -30,6 +32,12 @@ Built as a driver/example for using laptop trackpads as input devices in custom 
 - **GP2** = DATA, **GP3** = CLK (must be adjacent pins)
 - **4.7k-10k pull-up resistors** on DATA and CLK to 3.3V (PS/2 is open-drain). 4.7k tested and working.
 - Powered from the Pico's 3V3 OUT pin. If your trackpad doesn't respond at 3.3V, try powering it from VBUS (5V) with a level shifter on DATA/CLK.
+
+## Pre-built Firmware
+
+Pre-built `.uf2` files are available on the [Releases](https://github.com/NotoriousArnav/pico-touchpad-tm1386/releases) page. Each push to `main` automatically builds and publishes a new release named `release-<commit>-build.uf2`.
+
+Download the latest `.uf2`, hold **BOOTSEL** on the Pico, plug it in, and copy the file to the **RPI-RP2** drive.
 
 ## Building
 
