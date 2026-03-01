@@ -51,6 +51,15 @@ jobs:
           name: firmware
           path: build/main.uf2
 
+      - name: Package PS/2 Library
+        run: zip -r ps2-library.zip lib/ps2/
+
+      - name: Upload library artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: library
+          path: ps2-library.zip
+
   release:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -64,12 +73,19 @@ jobs:
         with:
           name: firmware
 
-      - name: Rename firmware
+      - name: Download library artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: library
+
+      - name: Rename artifacts
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           mv main.uf2 "release-${SHORT_SHA}-build.uf2"
+          mv ps2-library.zip "lib-${SHORT_SHA}-release.zip"
           echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"
           echo "UF2_NAME=release-${SHORT_SHA}-build.uf2" >> "$GITHUB_ENV"
+          echo "LIB_NAME=lib-${SHORT_SHA}-release.zip" >> "$GITHUB_ENV"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -78,4 +94,6 @@ jobs:
           name: Build ${{ env.SHORT_SHA }}
           body: |
             Automated build from commit [`${{ env.SHORT_SHA }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}).
-          files: ${{ env.UF2_NAME }}
+          files: |
+            ${{ env.UF2_NAME }}
+            ${{ env.LIB_NAME }}

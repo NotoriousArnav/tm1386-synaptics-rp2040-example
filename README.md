@@ -120,24 +120,38 @@ X:2800 Y:4000 Z:050 FINGERS:2 BTN:1
 
 The `lib/ps2/` directory is a self-contained, reusable PS/2 host driver. To use it in another pico-sdk project:
 
-1. Copy the `lib/ps2/` folder into your project.
-2. In your top-level `CMakeLists.txt`:
+1. Download the `lib-<commit-sha>-release.zip` file from the [Releases](https://github.com/NotoriousArnav/pico-touchpad-tm1386/releases) page.
+2. Extract the zip file directly into the root of your pico-sdk project. This will create a `lib/ps2/` folder.
+3. In your top-level `CMakeLists.txt`, add the subdirectory and link it to your target:
    ```cmake
    add_subdirectory(lib/ps2)
    target_link_libraries(your_target ps2)
    ```
-3. In your source:
+4. In your source code:
    ```cpp
    #include "ps2.hpp"
 
    PS2 device(pio0, 0, /*data_pin=*/2, /*clk_pin=*/3);
    device.init();
-   device.reset(id);
-   device.enable_reporting();
-
-   PS2::Packet pkt;
-   if (device.read_packet(pkt)) {
-       // use pkt.dx, pkt.dy, pkt.left, pkt.right, pkt.middle
+   
+   // Check if it's a Synaptics multi-touch pad
+   uint8_t minor, model, major;
+   if (device.synaptics_identify(minor, model, major)) {
+       device.synaptics_set_mode(0x81); // Enable Absolute + W Mode
+       
+       PS2::SynapticsData abs_data;
+       if (device.read_synaptics_packet(abs_data)) {
+           // use abs_data.x, abs_data.y, abs_data.z, abs_data.w
+       }
+   } else {
+       // Fallback to standard standard PS/2 mouse
+       device.reset(id);
+       device.enable_reporting();
+       
+       PS2::Packet rel_data;
+       if (device.read_packet(rel_data)) {
+           // use rel_data.dx, rel_data.dy, rel_data.left
+       }
    }
    ```
 
