@@ -8,6 +8,10 @@ The PS/2 protocol is handled by a **PIO-based driver** (`lib/ps2/`) that can be 
 
 Built as a driver/example for using laptop trackpads as input devices in custom projects — in this case, a low-profile DJ jog wheel alternative for scratching and MIDI control.
 
+## Project Status
+
+**Development is currently paused.** The hardware trackpad being used for development broke (data pin pad ripped off). Development will resume (including adding BOOTSEL-based trackpad reset and MIDI features) once a replacement trackpad is acquired. The library as it currently stands is fully functional and successfully extracts Synaptics multi-touch and absolute coordinates.
+
 ## Hardware Notes — TM1386
 
 - **Synaptics Absolute Mode:** The driver automatically detects if the trackpad is Synaptics-compatible and switches it into Absolute Mode with W-Mode enabled.
